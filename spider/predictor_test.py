@@ -54,7 +54,7 @@ class KeywordVersionForecaster:
             print(f"✅ 成功讀取欄位: {df.columns.tolist()}")
         return df
 
-    def run_forecast_and_show(self):
+    def run_forecast_and_show(self,target_version=None):
         # 1. 抓取與清洗
         df_raw = self.fetch_data()
         if df_raw.empty:
@@ -70,14 +70,22 @@ class KeywordVersionForecaster:
             'comments_count': 'mean'
         }).reset_index()
 
+        # 3. 確定預測目標版本
+        last_v = df_ver['version'].max()
+        if target_version is None:
+            target_v = round(last_v + 0.1, 1)
+        else:
+            target_v = float(target_version)
+        
         df_ver['prev_likes'] = df_ver['likes'].shift(1)
         df_ver['prev_comments'] = df_ver['comments_count'].shift(1)
         
         train_df = df_ver.dropna().copy()
         if len(train_df) < 2:
-            print("⚠️ 版本數據不足，無法進行預測 (需至少 3 個版本)")
+            print(f"⚠️ 數據量不足 (目前僅 {len(df_ver)} 個版本)，無法進行趨勢預測。")
+            self._plot_results(df_ver, None, None, None) # 僅顯示歷史
             return
-
+        
         # 3. LightGBM 模型
         features = ['version', 'prev_likes', 'prev_comments']
         X = train_df[features]
@@ -96,10 +104,12 @@ class KeywordVersionForecaster:
             'prev_comments': [df_ver['comments_count'].iloc[-1]]
         })
         next_pred = model.predict(future_X)[0]
+        self._plot_results(df_ver, train_df, target_v, next_pred)
 
-# 6. 繪圖優化：顯示所有版本
+
+    def _plot_results(self, df_ver, train_df, target_v, target_pred):
+        # 6. 繪圖優化：顯示所有版本
         set_mpl_chinese_font()
-        
         # 根據版本數量動態調整圖表寬度，避免擁擠
         num_versions = len(df_ver)
         fig_width = max(10, num_versions * 0.8)
@@ -110,56 +120,70 @@ class KeywordVersionForecaster:
         ax.plot(df_ver['version'], df_ver['likes'], 'o-', label='實際平均按讚數', 
                 color='#1f77b4', lw=2.5, markersize=10, zorder=3)
         
-        # LightGBM 擬合線 (從第二個點開始有預測)
-        ax.plot(train_df['version'], train_df['prediction'], '--', label='LightGBM 學習趨勢', 
-                color='#ff7f0e', alpha=0.8, lw=2)
+        # B. 繪製模型擬合趨勢 (若有模型)
+        if train_df is not None:
+            ax.plot(train_df['version'], train_df['prediction'], '--', 
+                    label='LightGBM 擬合趨勢', color='#ff7f0e', alpha=0.7)
         
-        # 未來預測星號
-        ax.scatter(next_v, next_pred, color='red', s=300, marker='*', 
-                   label=f'未來版本 {next_v} 預測', zorder=5)
+        # C. 繪製預測目標點
+        if target_v and target_pred:
+            # 畫預測星號
+            ax.scatter(target_v, target_pred, color='red', s=250, marker='*', 
+                       label=f'預測版本 {target_v}', zorder=5)
+            # 連接線
+            last_v = df_ver['version'].iloc[-1]
+            last_l = df_ver['likes'].iloc[-1]
+            ax.plot([last_v, target_v], [last_l, target_pred], 'r:', alpha=0.5)
+            
+            # 數值標註
+            ax.annotate(f"預測: {target_pred:.1f}", (target_v, target_pred),
+                        xytext=(0, 15), textcoords="offset points", ha='center',
+                        bbox=dict(boxstyle='round,pad=0.3', fc='yellow', alpha=0.6),
+                        color='red', weight='bold')
 
         # --- 座標軸優化 ---
         # 合併所有要顯示的版本刻度（現有的 + 未來的）
-        all_v_ticks = sorted(list(df_ver['version']) + [next_v])
-        ax.set_xticks(all_v_ticks)
-        ax.set_xticklabels([f"Ver {v}" for v in all_v_ticks], rotation=45)
-
-        # --- 數值標註 ---
-        # 在每個實際點標註數值
-        for i, row in df_ver.iterrows():
-            ax.annotate(f"{row['likes']:.0f}", (row['version'], row['likes']),
-                        textcoords="offset points", xytext=(0,12), ha='center', fontsize=9)
-
-        # 預測點標註 (加上黃色背景框)
-        ax.annotate(f"預測: {next_pred:.1f}", (next_v, next_pred),
-                    xytext=(0, 20), textcoords="offset points", ha='center',
-                    bbox=dict(boxstyle='round,pad=0.3', fc='yellow', alpha=0.6),
-                    color='red', weight='bold')
-
-        ax.set_title(f"版本流量全覽與未來預測)", fontsize=16)
-        ax.set_xlabel("版本號 (自 category_tag 提取)", fontsize=12)
-        ax.set_ylabel("平均按讚數", fontsize=12)
-        ax.legend(loc='upper left')
-        ax.grid(True, linestyle=':', alpha=0.6)
+        # X 軸刻度優化
+        all_ticks = sorted(list(df_ver['version']))
+        if target_v: all_ticks.append(target_v)
         
-        plt.tight_layout() # 防止標籤超出邊界
-        plt.show()
+        ax.set_xticks(all_ticks)
+        ax.set_xticklabels([f"V{v}" for v in all_ticks], rotation=45)
 
+        ax.set_title("版本流量全覽與 LightGBM 未來預測", fontsize=16)
+        ax.set_xlabel("版本號 (Version)")
+        ax.set_ylabel("平均按讚數 (Likes)")
+        ax.legend()
+        ax.grid(True, linestyle=':', alpha=0.5)
+        
+        plt.tight_layout()
+        plt.show()
 # --- 主程式進入點 ---
 if __name__ == "__main__":
     # 1. 初始化你的 Handler (根據你的類別參數調整)
     # db = MySQLHandler(host='...', user='...', ...)
-    db = MySQLHandler(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME")
-    )
-    
-    # 2. 執行預測
-    forecaster = KeywordVersionForecaster(db)
-    fig =forecaster.run_forecast_and_show()
-    if isinstance(fig, str):
-        print(fig)
-    else:
-        plt.show()
+    try:
+        db = MySQLHandler(
+            host=os.getenv("DB_HOST", "localhost"),
+            user=os.getenv("DB_USER", "root"),
+            password=os.getenv("DB_PASSWORD", "你的密碼"),
+            database=os.getenv("DB_NAME", "你的資料庫名")
+        )
+        
+        # 2. 初始化預測器
+        forecaster = KeywordVersionForecaster(db)
+        
+        # 3. 互動式輸入
+        print("\n" + "="*30)
+        print("🚀 歡迎使用版本流量預測系統 (LightGBM)")
+        print("="*30)
+        
+        user_v = input("請輸入想要預測的版本號 (例如 4.6，直接按 Enter 預測下一版): ").strip()
+        
+        if user_v == "":
+            forecaster.run_forecast_and_show(target_version=None)
+        else:
+            forecaster.run_forecast_and_show(target_version=user_v)
+            
+    except Exception as e:
+        print(f"❌ 程式執行失敗: {e}")
