@@ -97,23 +97,52 @@ class KeywordVersionForecaster:
         })
         next_pred = model.predict(future_X)[0]
 
-        # 5. 繪製圖表
+# 6. 繪圖優化：顯示所有版本
         set_mpl_chinese_font()
-        fig, ax = plt.subplots(figsize=(10, 6))
         
-        # 歷史軌跡
-        ax.plot(df_ver['version'], df_ver['likes'], 'o-', label='實際平均按讚數', color='#1f77b4', lw=2)
-        # 學習趨勢
-        ax.plot(train_df['version'], train_df['prediction'], '--', label='LightGBM 模型擬合', color='#ff7f0e')
-        # 預測星號
-        ax.scatter(next_v, next_pred, color='red', s=200, marker='*', label=f'預測 Ver {next_v}', zorder=5)
+        # 根據版本數量動態調整圖表寬度，避免擁擠
+        num_versions = len(df_ver)
+        fig_width = max(10, num_versions * 0.8)
+        fig, ax = plt.subplots(figsize=(fig_width, 6))
+        
+        # --- 繪製線條 ---
+        # 歷史實際點
+        ax.plot(df_ver['version'], df_ver['likes'], 'o-', label='實際平均按讚數', 
+                color='#1f77b4', lw=2.5, markersize=10, zorder=3)
+        
+        # LightGBM 擬合線 (從第二個點開始有預測)
+        ax.plot(train_df['version'], train_df['prediction'], '--', label='LightGBM 學習趨勢', 
+                color='#ff7f0e', alpha=0.8, lw=2)
+        
+        # 未來預測星號
+        ax.scatter(next_v, next_pred, color='red', s=300, marker='*', 
+                   label=f'未來版本 {next_v} 預測', zorder=5)
 
-        ax.set_title(f"版本流量預測趨勢 (基於 category_tag)", fontsize=15)
-        ax.set_xlabel("版本號 (Version)")
-        ax.set_ylabel("平均按讚數")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        # --- 座標軸優化 ---
+        # 合併所有要顯示的版本刻度（現有的 + 未來的）
+        all_v_ticks = sorted(list(df_ver['version']) + [next_v])
+        ax.set_xticks(all_v_ticks)
+        ax.set_xticklabels([f"Ver {v}" for v in all_v_ticks], rotation=45)
+
+        # --- 數值標註 ---
+        # 在每個實際點標註數值
+        for i, row in df_ver.iterrows():
+            ax.annotate(f"{row['likes']:.0f}", (row['version'], row['likes']),
+                        textcoords="offset points", xytext=(0,12), ha='center', fontsize=9)
+
+        # 預測點標註 (加上黃色背景框)
+        ax.annotate(f"預測: {next_pred:.1f}", (next_v, next_pred),
+                    xytext=(0, 20), textcoords="offset points", ha='center',
+                    bbox=dict(boxstyle='round,pad=0.3', fc='yellow', alpha=0.6),
+                    color='red', weight='bold')
+
+        ax.set_title(f"版本流量全覽與未來預測)", fontsize=16)
+        ax.set_xlabel("版本號 (自 category_tag 提取)", fontsize=12)
+        ax.set_ylabel("平均按讚數", fontsize=12)
+        ax.legend(loc='upper left')
+        ax.grid(True, linestyle=':', alpha=0.6)
         
+        plt.tight_layout() # 防止標籤超出邊界
         plt.show()
 
 # --- 主程式進入點 ---
