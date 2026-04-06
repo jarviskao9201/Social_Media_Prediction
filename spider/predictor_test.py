@@ -1,0 +1,136 @@
+import re
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import lightgbm as lgb
+import os
+from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+from db_handler import MySQLHandler  # 使用你的自定義類別
+load_dotenv()  # 從 .env 加載環境變數
+# --- 1. 自動字體設定 (修正 AttributeError) ---
+def set_mpl_chinese_font():
+    # 優先尋找支援中文的字體
+    font_candidates = ['Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'SimHei', 'Arial Unicode MS']
+    available_fonts = [f.name for f in fm.fontManager.ttflist]
+    
+    for font in font_candidates:
+        if font in available_fonts:
+            plt.rcParams['font.sans-serif'] = [font]
+            plt.rcParams['axes.unicode_minus'] = False
+            return font
+    return None
+
+class KeywordVersionForecaster:
+    def __init__(self, db_handler):
+        """
+        傳入已經初始化好的 MySQLHandler 實例
+        """
+        db_handler=MySQLHandler(
+            host=os.getenv("DB_HOST"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            database=os.getenv("DB_NAME")
+        )
+        self.db = db_handler
+
+    def extract_version(self, tag_str):
+        """從 category_tag 提取版本號 (例如: 'v4.1_活動' -> 4.1)"""
+        if not tag_str: return None
+        match = re.search(r'(\d+\.\d+)', str(tag_str))
+        return float(match.group(1)) if match else None
+
+    def fetch_data(self):
+        """整合你的 MySQLHandler 方法"""
+        query = "SELECT category_tag, likes, comments_count FROM articles"
+        
+        # 使用你剛找到的正確方法名
+        # 因為它已經回傳 pd.DataFrame()，所以直接 return 即可
+        df = self.db.get_data_by_query(query)
+        
+        if df.empty:
+            print("⚠️ 從資料庫取得的數據為空，請檢查 table 'articles' 是否有資料。")
+        if not df.empty:
+            print(f"✅ 成功讀取欄位: {df.columns.tolist()}")
+        return df
+
+    def run_forecast_and_show(self):
+        # 1. 抓取與清洗
+        df_raw = self.fetch_data()
+        if df_raw.empty:
+            print("⚠️ 資料庫中無資料")
+            return
+
+        df_raw['version'] = df_raw['category_tag'].apply(self.extract_version)
+        df_raw = df_raw.dropna(subset=['version']).sort_values('version')
+
+        # 2. 版本聚合與特徵工程
+        df_ver = df_raw.groupby('version').agg({
+            'likes': 'mean',
+            'comments_count': 'mean'
+        }).reset_index()
+
+        df_ver['prev_likes'] = df_ver['likes'].shift(1)
+        df_ver['prev_comments'] = df_ver['comments_count'].shift(1)
+        
+        train_df = df_ver.dropna().copy()
+        if len(train_df) < 2:
+            print("⚠️ 版本數據不足，無法進行預測 (需至少 3 個版本)")
+            return
+
+        # 3. LightGBM 模型
+        features = ['version', 'prev_likes', 'prev_comments']
+        X = train_df[features]
+        y = train_df['likes']
+
+        model = lgb.LGBMRegressor(n_estimators=100, learning_rate=0.1, verbose=-1)
+        model.fit(X, y)
+        train_df['prediction'] = model.predict(X)
+
+        # 4. 預測下一個版本 (Next Version)
+        last_v = df_ver['version'].max()
+        next_v = round(last_v + 0.1, 1)
+        future_X = pd.DataFrame({
+            'version': [next_v],
+            'prev_likes': [df_ver['likes'].iloc[-1]],
+            'prev_comments': [df_ver['comments_count'].iloc[-1]]
+        })
+        next_pred = model.predict(future_X)[0]
+
+        # 5. 繪製圖表
+        set_mpl_chinese_font()
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # 歷史軌跡
+        ax.plot(df_ver['version'], df_ver['likes'], 'o-', label='實際平均按讚數', color='#1f77b4', lw=2)
+        # 學習趨勢
+        ax.plot(train_df['version'], train_df['prediction'], '--', label='LightGBM 模型擬合', color='#ff7f0e')
+        # 預測星號
+        ax.scatter(next_v, next_pred, color='red', s=200, marker='*', label=f'預測 Ver {next_v}', zorder=5)
+
+        ax.set_title(f"版本流量預測趨勢 (基於 category_tag)", fontsize=15)
+        ax.set_xlabel("版本號 (Version)")
+        ax.set_ylabel("平均按讚數")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        plt.show()
+
+# --- 主程式進入點 ---
+if __name__ == "__main__":
+    # 1. 初始化你的 Handler (根據你的類別參數調整)
+    # db = MySQLHandler(host='...', user='...', ...)
+    db = MySQLHandler(
+        host=os.getenv("DB_HOST"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        database=os.getenv("DB_NAME")
+    )
+    
+    # 2. 執行預測
+    forecaster = KeywordVersionForecaster(db)
+    fig =forecaster.run_forecast_and_show()
+    if isinstance(fig, str):
+        print(fig)
+    else:
+        plt.show()

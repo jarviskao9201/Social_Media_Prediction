@@ -1,0 +1,66 @@
+import pandas as pd
+from db_handler import MySQLHandler
+import sys
+import os
+from dotenv import load_dotenv
+load_dotenv()  # 載入 .env 檔案中的環境變數
+
+def test_connection():
+    # 1. 設定你的資料庫資訊 (請務必檢查這些欄位)
+    db_config = {
+        "host": os.getenv("DB_HOST"),  # 建議優先使用 IP 而非 localhost
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "database": os.getenv("DB_NAME")
+    }
+
+    print("🔍 正在嘗試連線至 MySQL...")
+    
+    try:
+        # 初始化你的 Handler
+        db = MySQLHandler(**db_config)
+        print("✅ 資料庫初始化成功！(Table 已檢查/建立)")
+
+        # 2. 模擬一份假資料 (模擬爬蟲抓到的 DataFrame)
+        test_data = {
+            "URL": "https://test.com/article/123",
+            "文章標題": "測試文章-維護檢查",
+            "文章內容": "這是一段測試內容，包含 Emoji 🚀",
+            "文章讚數": 99,
+            "留言數": 1,
+            "summary_keywords": "系統/維護",
+            "留言內容": "測試留言",
+            "留言讚數": 5,
+            "語言": "zh-TW",
+            "情緒標籤": "Positive",
+            "信心值": 0.9876
+        }
+        df = pd.DataFrame([test_data])
+
+        # 3. 測試寫入
+        print("💾 正在嘗試寫入測試資料...")
+        if db.save_to_mysql(df):
+            print("✨ 寫入成功！ON DUPLICATE KEY 邏輯運作正常。")
+        
+        # 4. 測試讀取
+        print("📖 正在嘗試讀取剛才寫入的資料...")
+        res = db.get_data_by_query("SELECT * FROM articles WHERE url='https://test.com/article/123'")
+        
+        if not res.empty:
+            print(f"🎊 成功從資料庫抓回標題: {res['title'].iloc[0]}")
+            print("\n💪 MySQL 環境完全正常，可以回去跑主程式了！")
+        else:
+            print("❓ 寫入似乎沒報錯，但查不到資料。")
+
+    except Exception as e:
+        print(f"\n❌ 測試失敗！錯誤訊息如下：")
+        print("-" * 30)
+        print(e)
+        print("-" * 30)
+        print("\n💡 排錯建議：")
+        print("1. 確認 MySQL 服務是否已啟動 (Windows Service / XAMPP)")
+        print("2. 確認密碼是否正確")
+        print("3. 確認是否有手動建立過資料庫 (CREATE DATABASE hoyo_data)")
+
+if __name__ == "__main__":
+    test_connection()

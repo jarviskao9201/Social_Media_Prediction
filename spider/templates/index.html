@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ info.project_name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen py-10 flex flex-col items-center">
+    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl mb-8">
+        <h1 class="text-2xl font-bold text-blue-600 mb-4">{{ info.project_name }}</h1>
+        
+        <div class="grid grid-cols-2 gap-4 mb-6 p-4 bg-blue-50 rounded border border-blue-200">
+            <p class="text-sm text-gray-600">系統狀態: <span class="text-green-600 font-semibold">{{ info.status }}</span></p>
+            <p class="text-sm text-gray-600 text-right">資料庫: <span class="text-gray-800 font-mono">{{ info.db_host }}</span></p>
+        </div>
+
+        <div class="space-y-4">
+            <label class="block text-sm font-medium text-gray-700">目標網址</label>
+            <div class="flex gap-2">
+                <input type="text" id="target_url" 
+                    value="https://www.hoyolab.com/circles/6/39/official?page_type=39&page_sort=news" 
+                    class="flex-1 p-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-sm">
+                <button onclick="startCrawl()" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded transition duration-200 whitespace-nowrap">
+                    啟動爬蟲
+                </button>
+            </div>
+            <div id="response" class="text-xs text-gray-500 italic hidden"></div>
+        </div>
+    </div>
+
+    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-4xl">
+        <div class="flex items-center justify-between mb-6 border-b pb-4">
+            <h2 class="text-xl font-bold text-gray-800">📊 數據分析儀表板</h2>
+            <div class="flex space-x-2">
+                <button onclick="loadChart('sentiment')" class="px-3 py-1 bg-gray-200 hover:bg-blue-500 hover:text-white rounded text-sm transition">情緒分析</button>
+                <button onclick="loadChart('top')" class="px-3 py-1 bg-gray-200 hover:bg-blue-500 hover:text-white rounded text-sm transition">熱門排行</button>
+                <button onclick="loadChart('trend')" class="px-3 py-1 bg-gray-200 hover:bg-blue-500 hover:text-white rounded text-sm transition">趨勢預測</button>
+            </div>
+        </div>
+
+        <div id="chart-container" class="relative min-h-[400px] flex items-center justify-center border-2 border-dashed border-gray-200 rounded-lg bg-gray-50">
+            <div id="chart-placeholder" class="text-gray-400 text-center">
+                <p>請點擊上方按鈕載入即時分析圖表</p>
+            </div>
+            <div id="chart-loading" class="hidden">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+            <div id="chart-content" class="w-full"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- 原有的爬蟲功能 ---
+        async function startCrawl() {
+            const url = document.getElementById('target_url').value;
+            const resDiv = document.getElementById('response');
+            resDiv.classList.remove('hidden', 'text-green-600', 'text-red-600');
+            resDiv.innerText = "⏳ 任務發送中...";
+
+            try {
+                const response = await fetch(`/start_crawl?target_url=${encodeURIComponent(url)}`, { method: 'POST' });
+                const data = await response.json();
+                resDiv.innerText = "🚀 伺服器回應: " + data.message;
+                resDiv.classList.add('text-green-600');
+            } catch (err) {
+                resDiv.innerText = "❌ 出錯了: " + err;
+                resDiv.classList.add('text-red-600');
+            }
+        }
+
+        // --- 新增的圖表加載功能 ---
+        async function loadChart(type) {
+            const content = document.getElementById('chart-content');
+            const placeholder = document.getElementById('chart-placeholder');
+            const loading = document.getElementById('chart-loading');
+
+            // 顯示加載動畫
+            placeholder.classList.add('hidden');
+            content.innerHTML = '';
+            loading.classList.remove('hidden');
+
+            try {
+                const response = await fetch(`/chart/${type}`);
+                const html = await response.text();
+                
+                // 模擬一點延遲讓 UI 更有感
+                setTimeout(() => {
+                    loading.classList.add('hidden');
+                    content.innerHTML = html;
+                }, 300);
+                
+            } catch (err) {
+                loading.classList.add('hidden');
+                content.innerHTML = `<p class="text-red-500 text-center">圖表加載失敗: ${err}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
